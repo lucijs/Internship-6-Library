@@ -119,7 +119,8 @@ BEGIN
 END;
 $$
 ---------------------------------------------------------
-CREATE OR REPLACE PROCEDURE CheckDebt(UId INT)
+CREATE OR REPLACE FUNCTION CheckDebt(UId INT)
+	RETURNS FLOAT
 	LANGUAGE plpgsql
 	AS $$
 	DECLARE 
@@ -137,7 +138,7 @@ CREATE OR REPLACE PROCEDURE CheckDebt(UId INT)
             				Debt := Debt + 0.3;
           				END IF;
         			ELSE
-          				IF (SELECT Type FROM Books WHERE Id = BookId) = 'Lektira' THEN
+          				IF (SELECT Type FROM Books b JOIN UserBooks ub ON b.Id = ub.BookId WHERE ub.UserId=UId and Date = ReturnDate) = 'Lektira' THEN
             				Debt := Debt + 0.5;
           				ELSEIF EXTRACT(DOW FROM Date) IN (0, 6) THEN 
             				Debt := Debt + 0.4;
@@ -155,6 +156,7 @@ CREATE OR REPLACE PROCEDURE CheckDebt(UId INT)
 			SET UsersDebt = Debt
 			WHERE Id = UId;
 		END IF;
+		RETURN Debt;
 	END;
 	$$
 ---------------------------------------------------------
