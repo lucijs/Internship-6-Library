@@ -97,6 +97,11 @@ GROUP BY b.Name,c.Name
 
 --broj autora (koji su objavili više od 5 knjiga) po struci, desetljeću rođenja i spolu; u slučaju da je broj autora manji od 10,
 --ne prikazuj kategoriju; poredaj prikaz po desetljeću rođenja
-
+SELECT COUNT(a.Id) FROM Authors a
+JOIN AuthorBooks ab ON ab.AuthorId = a.Id
+JOIN Books b ON b.Id = ab.BookId
+GROUP BY a.Profession, EXTRACT(YEAR FROM a.DateOfBirth)%1100, a.Gender
+HAVING COUNT(b.Id)>5
 
 --10 najbogatijih autora, ako po svakoj knjizi dobije brojPrimjerakabrojAutoraPoKnjizi €
+SELECT a.FirstName 
