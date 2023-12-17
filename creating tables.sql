@@ -30,16 +30,16 @@ CREATE TABLE Books(
 	ReleaseDate TIMESTAMP,
 	Type VARCHAR NOT NULL,
 	LibraryId INT REFERENCES Libraries(Id),
-	Available BOOL
+	Available VARCHAR
 );
 
 ALTER TABLE Books
 	ADD CONSTRAINT BookTyps CHECK(Type in ('Lektira','Umjetnička','Znanstvena','Biografija','Stručna'));
 	
 CREATE TABLE AuthorBooks(
-	Id SERIAL PRIMARY KEY,
 	BookId INT REFERENCES Books(Id),
 	AuthorId INT REFERENCES Authors(Id),
+	PRIMARY KEY(BookId,AuthorId),
 	Type VARCHAR NOT NULL
 );
 
@@ -66,34 +66,55 @@ CREATE TABLE UserBooks(
 	UserId INT REFERENCES Users(Id),
 	LendDate TIMESTAMP,
 	ReturnDate TIMESTAMP,
-	Extend BOOL
+	Extend VARCHAR,
+	Returned VARCHAR
 );
 ---------------------------------------------------------
 CREATE OR REPLACE PROCEDURE LendABook(BookId INT, UserId Int)
 LANGUAGE plpgsql
 AS $$
 BEGIN
-	IF (SELECT NumberOfLendedBooks FROM Users WHERE Id=UserId)<3 AND (SELECT Available FROM Books WHERE Id = BookId) = true 
+	IF (SELECT NumberOfLendedBooks FROM Users WHERE Id=UserId)<3 AND (SELECT Available FROM Books WHERE Id = BookId) = 'true' 
 		AND (SELECT LibraryId FROM Users WHERE Id=UserId)=(SELECT LibraryId FROM Books WHERE Id = BookId) THEN
-		INSERT INTO UserBoooks(BookId,UserId,LendDate,ReturnDate) VALUES(BookId,UserId,CURRENT_DATE,CURRENT_DATE + INTERVAL '20 days'); 
+		INSERT INTO UserBooks(BookId,UserId,LendDate,ReturnDate,Extend,Returned) VALUES(BookId,UserId,CURRENT_DATE,CURRENT_DATE + INTERVAL '20 days','true','false'); 
 		UPDATE Books
-		SET Available =false
+		SET Available ='false'
 		WHERE Id = BookId;
 		UPDATE Users
 		SET NumberOfBooksLended = NumberOfBooksLended +1
-		WHERE Id = UserId;		
+		WHERE Id = UserId;	
 	END IF;
 END;
 $$
 ---------------------------------------------------------
-CREATE PROCEDURE ExtendTheLending(BId INT, UId Int)
+CREATE OR REPLACE PROCEDURE ExtendTheLending(BId INT, UId Int)
 LANGUAGE plpgsql
 AS $$
 BEGIN
 	IF EXISTS(SELECT 1 FROM UserBooks WHERE BookId = BId AND UserId = UId) THEN
 		UPDATE UserBooks 
-		SET ReturnDate = ReturnDate + INTERVAL '40 days', Extend = false
+		SET ReturnDate = ReturnDate + INTERVAL '40 days', Extend = 'false'
 		WHERE UserId = UId and BookId = BId;
+	END IF;
+END;
+$$
+---------------------------------------------------------
+CREATE OR REPLACE PROCEDURE ReturnTheBook(BId INT, UId Int)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+	IF EXISTS(SELECT 1 FROM UserBooks WHERE BookId = BId AND UserId = UId) THEN
+		UPDATE UserBooks 
+		SET Returned = 'true'
+		WHERE UserId = UId and BookId = BId;
+		
+		UPDATE Books 
+		SET Available = 'true'
+		WHERE BookId = BId;
+		
+		UPDATE Users 
+		SET NumberOfBooksLended = NumberOfBooksLended - 1
+		WHERE UserId = UId;
 	END IF;
 END;
 $$
@@ -159,3 +180,84 @@ CREATE TRIGGER add_author
 BEFORE INSERT ON  Authors
 FOR EACH ROW
 EXECUTE FUNCTION add_author();
+---------------------------------------------------------
+CREATE OR REPLACE FUNCTION lend_a_book()
+RETURNS TRIGGER 
+LANGUAGE plpgsql
+AS $$
+BEGIN
+	IF (SELECT NumberOfLendedBooks FROM Users WHERE Id=NEW.UserId)>=3 THEN
+		RAISE EXCEPTION 'Insert prevented: the user already has 3 books.';
+	ELSEIF (SELECT Available FROM Books WHERE Id = NEW.BookId) = 'false' THEN 
+		RAISE EXCEPTION 'Insert prevented: the book is unavailable';
+	ELSEIF (SELECT LibraryId FROM Users WHERE Id=NEW.UserId)!=(SELECT LibraryId FROM Books WHERE Id = NEW.BookId) THEN
+		RAISE EXCEPTION 'Insert prevented: the book and the user are not in the same library';
+	ELSE 
+		NEW.Extend = 'true';
+		NEW.ReturnDate = NEW.LendDate+ INTERVAL '20 days'; 
+		CASE WHEN CAST(NEW.Returned AS INT)%2= 0 THEN
+				NEW.Returned = 'true';
+				CALL ReturnTheBook(NEW.BookId, NEW.UserId);
+		 	 WHEN CAST(NEW.Returned AS INT) % 2 = 1 THEN
+				NEW.Returned = 'false';
+				UPDATE Books
+				SET Available ='false'
+				WHERE Id = NEW.BookId;
+				UPDATE Users
+				SET NumberOfLendedBooks = NumberOfLendedBooks +1
+				WHERE Id = NEW.UserId;
+		END CASE;	
+	END IF;
+	RETURN NEW;
+END; 
+$$
+--------------------------------------------------------
+CREATE TRIGGER lend_a_book
+BEFORE INSERT ON  UserBooks
+FOR EACH ROW
+EXECUTE FUNCTION lend_a_book();
+---------------------------------------------------------
+CREATE OR REPLACE FUNCTION add_a_book()
+RETURNS TRIGGER 
+LANGUAGE plpgsql
+AS $$
+BEGIN
+	CASE WHEN CAST(NEW.Type AS INT)%5=0 THEN
+			NEW.Type = 'Lektira';
+		 WHEN CAST(NEW.Type AS INT)%5=1 THEN
+			NEW.Type = 'Umjetnička';
+		 WHEN CAST(NEW.Type AS INT)%5=2 THEN
+			NEW.Type = 'Znanstvena';
+		 WHEN CAST(NEW.Type AS INT)%5=3 THEN
+			NEW.Type = 'Biografija';
+		 WHEN CAST(NEW.Type AS INT)%5=4 THEN
+			NEW.Type = 'Stručna';
+	END CASE;
+	NEW.Available = 'true';
+	RETURN NEW;
+END; 
+$$
+--------------------------------------------------------
+CREATE TRIGGER add_a_book
+BEFORE INSERT ON  Books
+FOR EACH ROW
+EXECUTE FUNCTION add_a_book();
+---------------------------------------------------------
+CREATE OR REPLACE FUNCTION add_AuthorBooks()
+RETURNS TRIGGER 
+LANGUAGE plpgsql
+AS $$
+BEGIN
+	CASE WHEN CAST(NEW.Type AS INT)%2= 0 THEN
+			NEW.Type = 'Main';
+		 WHEN CAST(NEW.Type AS INT) % 2 = 1 THEN
+			NEW.Type = 'Secondary';
+	END CASE;
+	RETURN NEW;
+END; 
+$$
+--------------------------------------------------------
+CREATE TRIGGER add_AuthorBooks
+BEFORE INSERT ON AuthorBooks
+FOR EACH ROW
+EXECUTE FUNCTION add_AuthorBooks();
